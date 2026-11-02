@@ -10,4 +10,13 @@ const stale=await(await request('/rooms/'+h.code+'/move','POST',{token:0,to:'E4'
 const seen=await(await request('/rooms/'+h.code,'GET',undefined,h)).json();assert.equal(seen.state.pos[0],'E3');
 const reset=await(await request('/rooms/'+h.code+'/reset','POST',{},h)).json();assert.equal(reset.state.moves,0);assert.equal(reset.state.revision,2);
 assert.equal((await request('/rooms/ZZZZZZZZ/join','POST',{role:'movers'})).status,404);
+const newRoom=await(await request('/rooms','POST',{})).json();
+const first=await(await request('/rooms/'+newRoom.code+'/join','POST',{clientId:'participant-first-0001'})).json();
+const second=await(await request('/rooms/'+newRoom.code+'/join','POST',{clientId:'participant-second-0002'})).json();
+assert.notEqual(first.role,second.role,'First two tablets must be in opposite teams');
+const again=await(await request('/rooms/'+newRoom.code+'/join','POST',{clientId:'participant-first-0001'})).json();assert.equal(again.role,first.role);assert.equal(again.token,first.token);assert(!('assignments'in again));
+const concurrentRoom=await(await request('/rooms','POST',{})).json();
+const joined=await Promise.all(['concurrent-player-001','concurrent-player-002'].map(clientId=>request('/rooms/'+concurrentRoom.code+'/join','POST',{clientId}).then(r=>r.json())));assert.notEqual(joined[0].role,joined[1].role);
+const counts={movers:0,guides:0};for(let i=0;i<40;i++){const v=await(await request('/rooms/'+newRoom.code+'/join','POST',{clientId:'extra-participant-'+String(i).padStart(3,'0')})).json();counts[v.role]++;}assert.equal(counts.movers,counts.guides);
 console.log('HTTPS API checks passed: create/join, separate snapshots, auth, authoritative moves, stale rejection, reset, CORS, missing room.');
+console.log('Random teams passed: balanced tablets, stable reconnect, concurrent joins, no roster exposure.');

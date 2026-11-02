@@ -307,10 +307,10 @@ export default {async fetch(request,env){
  try{
   const u=new URL(request.url),p=u.pathname.replace(/\/$/,'');
   if(request.method==='OPTIONS')return json({},204);
-  if(p==='/health'||p==='')return json({ok:true,transport:'https',version:3});
+  if(p==='/health'||p==='')return json({ok:true,transport:'https',version:4});
   if(!env.BUCKET)return json({error:'storage_unavailable'},503);
   if(p==='/rooms'&&request.method==='POST'){
-   for(let n=0;n<4;n++){const code=random(8),room={code,keys:{host:random(32),movers:random(32),guides:random(32)},players:{movers:false,guides:false},state:engine.initial(),expires:Date.now()+86400000};
+   for(let n=0;n<4;n++){const code=random(8),room={code,keys:{host:random(32),movers:random(32),guides:random(32)},players:{movers:false,guides:false},assignments:{},state:engine.initial(),expires:Date.now()+86400000};
     const saved=await env.BUCKET.put('rooms/'+code+'.json',JSON.stringify(room),{onlyIf:{etagDoesNotMatch:'*'}});if(saved)return json({...snapshot(room,'host'),token:room.keys.host},201);
    }return json({error:'room_creation_failed'},503);
   }
@@ -322,8 +322,17 @@ export default {async fetch(request,env){
   for(let tries=0;tries<5;tries++){
    const found=await read(env.BUCKET,code);if(!found)return json({error:'room_not_found'},404);const {room,etag}=found;
    if(action==='join'){
-    const role=input.role;if(!['movers','guides'].includes(role))return json({error:'invalid_role'},400);
-    if(room.players[role])return json({...snapshot(room,role),token:room.keys[role]});
+    let role;const id=input.clientId;
+    if(typeof id==='string'&&/^[A-Za-z0-9_-]{16,80}$/.test(id)){
+     room.assignments??={};role=room.assignments[id];
+     if(role)return json({...snapshot(room,role),token:room.keys[role]});
+     const entries=Object.values(room.assignments),m=entries.filter(r=>r==='movers').length,g=entries.filter(r=>r==='guides').length;
+     role=m===g?(crypto.getRandomValues(new Uint8Array(1))[0]%2?'movers':'guides'):m<g?'movers':'guides';room.assignments[id]=role;
+    }else{
+     // Keep already-open v3 clients working during the frontend rollout.
+     role=input.role;if(!['movers','guides'].includes(role))return json({error:'invalid_role'},400);
+     if(room.players[role])return json({...snapshot(room,role),token:room.keys[role]});
+    }
     room.players[role]=true;const result=await env.BUCKET.put('rooms/'+code+'.json',JSON.stringify(room),{onlyIf:{etagMatches:etag}});if(result)return json({...snapshot(room,role),token:room.keys[role]});continue;
    }
    const role=authenticate(request,room);if(!role)return json({error:'unauthorized'},403);
