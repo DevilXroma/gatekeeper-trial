@@ -114,23 +114,24 @@ function draw(svg,guide){
   if(!guide)g.addEventListener('pointerdown',()=>notify('«Это гнездо. Вырезано в камне»','«Хотите двигать — беритесь за круглый жетон, он сверху лежит».','◇'));
  });
  if(!guide){
-  state.pos.forEach((id,i)=>{const[x,y]=xy(id),f=figures[i],done=engine.done(state.pos,i),g=svgEl(svg,'g',{class:done?'token settled':'token movable','data-token':i,role:done?'img':'button',tabindex:done?-1:0,'aria-label':`${f.name}${done?' в своём гнезде':' — подвижный жетон'}`});
+  state.pos.forEach((id,i)=>{const[x,y]=xy(id),f=figures[i],done=engine.done(state.pos,i),g=svgEl(svg,'g',{class:done?'token settled':'token movable','data-token-visual':i,role:'img','aria-label':`${f.name}${done?' в своём гнезде':' — подвижный жетон'}`});
     g.style.setProperty('--token-color',f.color);g.style.setProperty('--float-delay',-i*.83+'s');svgEl(g,'circle',{cx:x,cy:y,r:30,fill:'transparent'});svgEl(g,'ellipse',{cx:x,cy:y+9,rx:22,ry:13,fill:'#0009',class:'token-shadow'});const floating=svgEl(g,'g',{class:'token-float'});svgEl(floating,'circle',{cx:x,cy:y+3,r:19,fill:'#12191b',stroke:f.color,'stroke-width':1,'stroke-opacity':.4});svgEl(floating,'circle',{cx:x,cy:y-1,r:19,fill:'#344044',stroke:f.color,'stroke-width':2.5,class:'token-rim'});svgEl(floating,'circle',{cx:x,cy:y-1,r:15,fill:'#202c31',stroke:f.color,'stroke-width':.8,'stroke-opacity':.4});svgEl(floating,'path',{d:`M${x-13},${y-12}Q${x-2},${y-22} ${x+10},${y-15}`,fill:'none',stroke:'#f5eee0','stroke-opacity':.5,'stroke-width':1.5});svgEl(floating,'text',{x,y:y+6,'text-anchor':'middle',fill:f.color,'font-size':25},done?'✓':f.symbol);if(!done)svgEl(g,'ellipse',{cx:x,cy:y+5,rx:13,ry:4,fill:'none',stroke:f.color,'stroke-width':.7,'stroke-opacity':.35,class:'levitation-ring'});
     if(!done&&(host||role==='movers')){
-     g.addEventListener('pointerdown',e=>beginDrag(e,svg,i,g));g.addEventListener('click',()=>{selected=i;});
-     g.addEventListener('keydown',e=>{const dir={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]}[e.key];if(!dir||!online||pending||$('overlay').hidden===false)return;e.preventDefault();const n=level.nodes[id],to=engine.adj[id].find(k=>level.nodes[k].c===n.c+dir[0]&&level.nodes[k].r===n.r+dir[1]);if(to){proposal={token:i,to};render();}});
+     let controls=svg.parentElement.querySelector('.token-controls');if(!controls){controls=document.createElement('div');controls.className='token-controls';svg.parentElement.appendChild(controls);}const handle=document.createElement('button');handle.type='button';handle.className='token-handle';handle.dataset.token=i;handle.setAttribute('aria-label',f.name+' — подвижный жетон');handle.style.left=(x/size*100)+'%';handle.style.top=(y/size*100)+'%';handle.style.setProperty('--token-color',f.color);controls.appendChild(handle);
+     handle.addEventListener('pointerdown',e=>beginDrag(e,svg,i,g,handle));handle.addEventListener('click',()=>{selected=i;});
+     handle.addEventListener('keydown',e=>{const dir={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]}[e.key];if(!dir||!online||pending||$('overlay').hidden===false)return;e.preventDefault();const n=level.nodes[id],to=engine.adj[id].find(k=>level.nodes[k].c===n.c+dir[0]&&level.nodes[k].r===n.r+dir[1]);if(to){proposal={token:i,to};render();}});
     }
   });
   if(proposal){const[x,y]=xy(proposal.to);svgEl(svg,'circle',{cx:x,cy:y,r:24,fill:'none',stroke:figures[proposal.token].color,'stroke-width':2,'stroke-dasharray':'5 5'});}
  }
 }
 function point(event,svg){const r=svg.getBoundingClientRect();return [(event.clientX-r.left)*svg._size/r.width,(event.clientY-r.top)*svg._size/r.height];}
-function beginDrag(e,svg,i,g){
+function beginDrag(e,svg,i,g,handle){
  if(!online||pending||engine.done(state.pos,i)||!$('overlay').hidden)return;e.preventDefault();selected=i;proposal=null;const from=state.pos[i],origin=svg._xy(from);drag={pointer:e.pointerId,svg,g,i,from,origin};g.classList.add('dragging');
- for(const to of engine.adj[from]){const[x,y]=svg._xy(to);svgEl(svg,'circle',{cx:x,cy:y,r:23,class:'reachable','data-reachable':to});}svg.appendChild(g);g.setPointerCapture(e.pointerId);
+ for(const to of engine.adj[from]){const[x,y]=svg._xy(to);svgEl(svg,'circle',{cx:x,cy:y,r:23,class:'reachable','data-reachable':to});}handle.setPointerCapture(e.pointerId);
  const moving=ev=>{if(!drag||ev.pointerId!==drag.pointer)return;const[x,y]=point(ev,svg);g.setAttribute('transform',`translate(${x-origin[0]},${y-origin[1]})`);};
- const end=ev=>{if(!drag||ev.pointerId!==drag.pointer)return;const[x,y]=point(ev,svg);let closest=null,distance=Infinity;for(const n of engine.adj[from]){const[nx,ny]=svg._xy(n),d=Math.hypot(x-nx,y-ny);if(d<distance){closest=n;distance=d;}}const cancelled=ev.type==='pointercancel';drag=null;g.removeEventListener('pointermove',moving);g.removeEventListener('pointerup',end);g.removeEventListener('pointercancel',end);if(!cancelled&&distance<Math.max(27,svg._size*.075))proposal={token:i,to:closest};render();if(!cancelled&&!proposal)rejected({type:'invalid'});};
- g.addEventListener('pointermove',moving);g.addEventListener('pointerup',end);g.addEventListener('pointercancel',end);
+ const end=ev=>{if(!drag||ev.pointerId!==drag.pointer)return;const[x,y]=point(ev,svg);let closest=null,distance=Infinity;for(const n of engine.adj[from]){const[nx,ny]=svg._xy(n),d=Math.hypot(x-nx,y-ny);if(d<distance){closest=n;distance=d;}}const cancelled=ev.type==='pointercancel';drag=null;handle.removeEventListener('pointermove',moving);handle.removeEventListener('pointerup',end);handle.removeEventListener('pointercancel',end);if(handle.hasPointerCapture(ev.pointerId))handle.releasePointerCapture(ev.pointerId);if(!cancelled&&distance<Math.max(27,svg._size*.075))proposal={token:i,to:closest};render();if(!cancelled&&!proposal)rejected({type:'invalid'});};
+ handle.addEventListener('pointermove',moving);handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);
 }
 function render(){
  if(!role)return;const guide=role==='guides',current=guide?guideState:state,arrived=guide?guideState.arrived:state.pos.map((_,i)=>engine.done(state.pos,i));

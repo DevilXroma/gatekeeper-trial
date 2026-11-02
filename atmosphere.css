@@ -10,3 +10,11 @@ body{background:#0b1012;background-image:radial-gradient(ellipse at 50% -10%,#33
 /* Browser toolbars change viewport height during mobile scrolling: keep scenery stable. */
 body{min-height:100svh}.ambient,#ambient-particles{height:100vh;height:100lvh;bottom:auto}.mist{height:90lvh}.mist-two{top:35lvh}.ambient-sigil{top:15lvh}.stone-board svg{touch-action:pan-y}.stone-board .token.movable{touch-action:none}
 .boards,.ambient,#ambient-particles{overflow-anchor:none}
+
+/* Stable native touch controls are independent of the animated SVG artwork. */
+.stone-board{position:relative}
+.stone-board .token{pointer-events:none}
+.token-controls{position:absolute;inset:0;pointer-events:none}
+.token-controls .token-handle{position:absolute;transform:translate(-50%,-50%);width:60px;height:60px;min-width:0;min-height:0;margin:0;padding:0;border:0;border-radius:50%;background:transparent;box-shadow:none;opacity:1;pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;cursor:grab;animation:none;transition:none}
+.token-controls .token-handle:active{cursor:grabbing;transform:translate(-50%,-50%);background:transparent}
+.token-controls .token-handle:focus-visible{outline:2px solid var(--token-color);outline-offset:2px}
