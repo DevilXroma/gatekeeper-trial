@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';import worker from './worker.mjs';
+import assert from 'node:assert/strict';import fs from 'node:fs';import worker from './worker.mjs';
 let seq=0;const objects=new Map();const BUCKET={async get(k){const v=objects.get(k);return v?{etag:v.etag,json:async()=>JSON.parse(v.body)}:null;},async put(k,body,options){const v=objects.get(k),c=options?.onlyIf;if(c?.etagDoesNotMatch==='*'&&v||c?.etagMatches&&c.etagMatches!==v?.etag)return null;const etag=String(++seq);objects.set(k,{body,etag});return {etag};}};
 const request=async(path,method='GET',body,session)=>worker.fetch(new Request('https://relay.test'+path,{method,headers:{'Content-Type':'application/json',...(session?{'Authorization':'Bearer '+session.token,'X-Game-Role':session.role}:{})},body:body===undefined?undefined:JSON.stringify(body)}),{BUCKET});
 assert.equal((await request('/rooms','OPTIONS')).status,204);
@@ -20,3 +20,9 @@ const joined=await Promise.all(['concurrent-player-001','concurrent-player-002']
 const counts={movers:0,guides:0};for(let i=0;i<40;i++){const v=await(await request('/rooms/'+newRoom.code+'/join','POST',{clientId:'extra-participant-'+String(i).padStart(3,'0')})).json();counts[v.role]++;}assert.equal(counts.movers,counts.guides);
 console.log('HTTPS API checks passed: create/join, separate snapshots, auth, authoritative moves, stale rejection, reset, CORS, missing room.');
 console.log('Random teams passed: balanced tablets, stable reconnect, concurrent joins, no roster exposure.');
+const sceneRoom=await(await request('/rooms','POST',{})).json();const sceneGuest=await(await request('/rooms/'+sceneRoom.code+'/join','POST',{role:'guides'})).json();let sceneState=sceneRoom.state;
+const path=JSON.parse(fs.readFileSync(new URL('../solution.json',import.meta.url),'utf8')).validation.path;
+for(const step of path){const r=await(await request('/rooms/'+sceneRoom.code+'/move','POST',{token:step.token,to:step.to,revision:sceneState.revision},sceneRoom)).json();assert(r.accepted);sceneState=r.state;}
+const sceneGuide=await(await request('/rooms/'+sceneRoom.code,'GET',undefined,sceneGuest)).json();assert.deepEqual(sceneGuide.state.events.filter(e=>e.type==='arrived'||e.type==='victory').map(e=>e.token).sort(),[0,1,2]);assert.equal(sceneGuide.state.events.at(-1).type,'victory');
+for(const e of sceneGuide.state.events)for(const forbidden of ['from','to','pos','gates'])assert(!(forbidden in e));assert(!('pos'in sceneGuide.state));
+console.log('Presentation events passed: every arrival including the last, queued history for slow clients, no hidden board data exposed.');

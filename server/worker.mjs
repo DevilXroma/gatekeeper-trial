@@ -299,7 +299,8 @@ const ALLOWED='https://devilxroma.github.io';
 const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const random=n=>Array.from(crypto.getRandomValues(new Uint8Array(n)),b=>alphabet[b%32]).join('');
 const json=(data,status=200)=>new Response(status===204?null:JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Access-Control-Allow-Origin':ALLOWED,'Access-Control-Allow-Headers':'Authorization, Content-Type, X-Game-Role','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Vary':'Origin'}});
-function snapshot(room,role){return {code:room.code,role,players:room.players,state:role==='guides'?{moves:room.state.moves,attempt:room.state.attempt,arrived:room.state.pos.map((_,i)=>engine.done(room.state.pos,i)),event:{type:room.state.event.type}}:room.state};}
+function presentationEvent(e,id,attempt){const out={id,type:e.type};if(e.type==='arrived'||e.type==='victory')out.token=e.token;if(e.type==='failure'){out.trap=level.danger.indexOf(edgeKey(e.from,e.to));out.variation=attempt%3;}return out;}
+function snapshot(room,role){const s=room.state,events=room.presentations||(s.history||[]).map((e,i)=>presentationEvent(e,s.revision-s.history.length+i+1,s.attempt)).filter(e=>['arrived','victory','failure'].includes(e.type));return {code:room.code,role,players:room.players,state:role==='guides'?{moves:s.moves,attempt:s.attempt,revision:s.revision,arrived:s.pos.map((_,i)=>engine.done(s.pos,i)),event:presentationEvent(s.event,s.revision,s.attempt),events}:{...s,events}};}
 async function read(bucket,code){const o=await bucket.get('rooms/'+code+'.json');if(!o)return null;const room=await o.json();if(room.expires<Date.now())return null;return {room,etag:o.etag};}
 function authenticate(request,room){const token=request.headers.get('Authorization')?.replace(/^Bearer /,'');const role=request.headers.get('X-Game-Role');if(!['host','movers','guides'].includes(role)||!token||token!==room.keys[role])return null;return role;}
 async function body(request){if(Number(request.headers.get('content-length'))>4096)throw Error('body');const raw=await request.text();if(raw.length>4096)throw Error('body');return raw?JSON.parse(raw):{};}
@@ -307,7 +308,7 @@ export default {async fetch(request,env){
  try{
   const u=new URL(request.url),p=u.pathname.replace(/\/$/,'');
   if(request.method==='OPTIONS')return json({},204);
-  if(p==='/health'||p==='')return json({ok:true,transport:'https',version:4});
+  if(p==='/health'||p==='')return json({ok:true,transport:'https',version:5});
   if(!env.BUCKET)return json({error:'storage_unavailable'},503);
   if(p==='/rooms'&&request.method==='POST'){
    for(let n=0;n<4;n++){const code=random(8),room={code,keys:{host:random(32),movers:random(32),guides:random(32)},players:{movers:false,guides:false},assignments:{},state:engine.initial(),expires:Date.now()+86400000};
@@ -340,8 +341,9 @@ export default {async fetch(request,env){
     if(!['host','movers'].includes(role))return json({error:'forbidden'},403);
     if(input.revision!==room.state.revision)return json({...snapshot(room,role),accepted:false,type:'stale'});
     const result=engine.move(room.state,input.token,input.to);if(!result.accepted)return json({...snapshot(room,role),...result});room.state=result.state;
+    if(['arrived','victory','failure'].includes(room.state.event.type))room.presentations=[...(room.presentations||[]).slice(-63),presentationEvent(room.state.event,room.state.revision,room.state.attempt)];
    }else if(action==='reset'){
-    if(role!=='host')return json({error:'forbidden'},403);room.state={...engine.initial(),revision:room.state.revision+1};
+    if(role!=='host')return json({error:'forbidden'},403);room.state={...engine.initial(),revision:room.state.revision+1};room.presentations=[];
    }else return json({error:'not_found'},404);
    const saved=await env.BUCKET.put('rooms/'+code+'.json',JSON.stringify(room),{onlyIf:{etagMatches:etag}});if(saved)return json({...snapshot(room,role),accepted:true});
   }

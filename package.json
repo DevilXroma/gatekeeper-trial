@@ -1,8 +1,8 @@
 {
   "name": "gatekeeper-trial",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "scripts": {
-    "test": "node test.mjs && node connection-test.mjs"
+    "test": "node test.mjs && node connection-test.mjs && node presentation-test.mjs"
   }
 }
