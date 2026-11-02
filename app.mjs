@@ -3,7 +3,7 @@ import {createEngine,figures,edgeKey} from './engine.mjs';
 import {createConnectionAttempt} from './connection-attempt.mjs';
 import {api,abortRequests} from './relay.mjs';
 import {trapThemes,scenesForEvent,localPresentationEvents,createPresentationCursor} from './presentation.mjs';
-import {startAmbience} from './ambience.mjs';
+import {startAmbience} from './ambience.mjs?v=5.1';
 const engine=createEngine(level),$=id=>document.getElementById(id),NS='http://www.w3.org/2000/svg';
 let role=null,state=engine.initial(),guideState={moves:0,attempt:1,arrived:[false,false,false],event:{type:'start'}},proposal=null,selected=0,reveal=false,host=false,local=false,room='',online=false,pending=false,connectionTimer=null,wake=null,netSession=null,networkGeneration=0,drag=null;
 const storageKey='gatekeeper-v2-state';
@@ -146,7 +146,8 @@ function render(){
  notify(...(messages[ev.type]||messages.move),ev.type==='failure');
  $('solution-step').disabled=!host||engine.won(state.pos);
 }
-window.addEventListener('resize',()=>{if(!drag&&role&&$('game').hidden===false)render();});
+let boardLayoutWidth=document.documentElement.clientWidth,layoutFrame=0;
+window.addEventListener('resize',()=>{const width=document.documentElement.clientWidth;if(width===boardLayoutWidth)return;boardLayoutWidth=width;cancelAnimationFrame(layoutFrame);layoutFrame=requestAnimationFrame(()=>{if(!drag&&role&&$('game').hidden===false)render();});});
 document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'&&host&&!local)try{wake=await navigator.wakeLock?.request('screen');}catch{}});
 const initialRole=new URLSearchParams(location.search).get('role');if(initialRole==='host')selectRole('host');else if(initialRole)selectRole('join');
 startAmbience($('ambient-particles'));
