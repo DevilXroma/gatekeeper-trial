@@ -1,74 +1,81 @@
 import {level} from './level.mjs';
 import {createEngine,figures,edgeKey} from './engine.mjs';
+import {createConnectionAttempt} from './connection-attempt.mjs';
+import {api,abortRequests} from './relay.mjs';
 const engine=createEngine(level),$=id=>document.getElementById(id),NS='http://www.w3.org/2000/svg';
-let role=null,state=engine.initial(),guideState={moves:0,attempt:1,arrived:[false,false,false],event:{type:'start'}},proposal=null,selected=0,reveal=false,host=false,local=false,peer=null,connection=null,room='',online=false,pending=false,links=[],drag=null,connectionTimer=null,wake=null;
+let role=null,state=engine.initial(),guideState={moves:0,attempt:1,arrived:[false,false,false],event:{type:'start'}},proposal=null,selected=0,reveal=false,host=false,local=false,room='',online=false,pending=false,connectionTimer=null,wake=null,netSession=null,networkGeneration=0,drag=null;
 const storageKey='gatekeeper-v2-state';
 function restore(){try{const v=JSON.parse(localStorage.getItem(storageKey));if(v?.version===2&&v.pos?.length===3&&v.pos.every(n=>level.nodes[n])&&new Set(v.pos).size===3)return v;}catch{}return engine.initial();}
 function save(){if(role==='host')try{localStorage.setItem(storageKey,JSON.stringify(state));}catch{}}
 function show(section){for(const id of ['lobby','connect','game'])$(id).hidden=id!==section;$('home-button').hidden=section==='lobby';}
 function notify(title,detail,icon='⌁',failure=false){$('event-title').textContent=title;$('event-detail').textContent=detail;$('event-icon').textContent=icon;$('event-strip').classList.toggle('failure',failure);}
-function status(text,ok){$('connection-pill').querySelector('span').textContent=text;$('connection-pill').classList.toggle('offline',!ok);}
+function status(text,ok,connecting=false){$('connection-pill').querySelector('span').textContent=text;$('connection-pill').classList.toggle('offline',!ok);$('connection-pill').classList.toggle('connecting',connecting);}
 function toastOverlay(type){const victory=type==='victory';$('overlay-symbol').textContent=victory?'☀ ☾ ϟ':'↺';$('overlay-title').textContent=victory?'Дверь поддаётся':'Привратник хихикает';$('overlay-text').textContent=victory?'Все три знака вернулись к своим выходам. Общая работа сделана.':'«А вот сюда — не надо». Фигурки вернулись на старт. Расположение поля не изменилось.';$('overlay').hidden=false;if(!victory){document.body.classList.add('shake');setTimeout(()=>document.body.classList.remove('shake'),450);}if(navigator.vibrate)navigator.vibrate(victory?[30,60,30]:60);}
 function selectRole(next){
  role=next;proposal=null;pending=false;$('overlay').hidden=true;
  if(next==='host'){host=true;local=true;online=true;state=restore();show('game');$('host-controls').hidden=false;$('view-title').textContent='Стол ведущего';$('view-subtitle').textContent='ОБЕ КОМАНДЫ · ОБЩЕЕ СОСТОЯНИЕ';status('Локальная проверка',true);render();}
- else {host=false;local=false;online=false;$('join-role').textContent=next==='movers'?'КОМАНДА I · ИСПОЛНИТЕЛИ':'КОМАНДА II · ПРОВОДНИКИ';$('join-status').textContent='';show('connect');const params=new URLSearchParams(location.search);$('room-input').value=params.get('room')||'';}
+ else {host=false;local=false;online=false;$('join-role').textContent=next==='movers'?'КОМАНДА I · ИСПОЛНИТЕЛИ':'КОМАНДА II · ПРОВОДНИКИ';resetJoinFeedback();show('connect');const params=new URLSearchParams(location.search);$('room-input').value=params.get('room')||'';}
 }
 document.querySelectorAll('[data-role]').forEach(b=>b.onclick=()=>selectRole(b.dataset.role));$('developer-button').onclick=()=>selectRole('host');
-$('home-button').onclick=()=>{if(host&&!local&&links.some(c=>c.open)&&!confirm('Закрыть партию и отключить команды?'))return;shutdown();role=null;show('lobby');};
-function shutdown(){clearInterval(connectionTimer);connectionTimer=null;for(const c of links)c.close();links=[];connection?.close();connection=null;peer?.destroy();peer=null;online=false;try{wake?.release();}catch{}}
-function safeSend(c,data){if(c?.open)try{c.send(data);}catch{}}
-function snapshot(forRole){return forRole==='movers'?{kind:'snapshot',role:'movers',state}:{kind:'snapshot',role:'guides',state:{moves:state.moves,attempt:state.attempt,arrived:state.pos.map((_,i)=>engine.done(state.pos,i)),event:{type:state.event.type}}};}
-function publish(){for(const c of links)safeSend(c,snapshot(c.metadata.role));$('clients-count').textContent=`Исполнители: ${links.filter(c=>c.open&&c.metadata.role==='movers').length} · Проводники: ${links.filter(c=>c.open&&c.metadata.role==='guides').length}`;}
+$('home-button').onclick=()=>{shutdown();role=null;show('lobby');};
+function shutdown(){networkGeneration++;clearTimeout(connectionTimer);connectionTimer=null;joinAttempt.stop();abortRequests();netSession=null;online=false;pending=false;try{wake?.release();}catch{}}
+function publish(){}
+function resetJoinFeedback(){$('join-feedback').hidden=true;$('join-feedback').classList.remove('error');$('join-submit').disabled=false;$('room-input').disabled=false;}
+function drawJoinProgress({stage,remaining}){
+ const stages=['server','host','sync'];$('join-feedback').hidden=false;$('join-feedback').classList.remove('error');$('join-spinner').hidden=false;$('join-result-icon').hidden=true;$('join-countdown').hidden=false;$('join-countdown').textContent=`${remaining} с`;$('join-retry').hidden=true;$('join-cancel').hidden=false;$('join-help').hidden=true;$('join-stages').hidden=false;
+ $('join-status').textContent={server:'Подключаемся к серверу…',host:'Ищем партию ведущего…',sync:'Загружаем игровое поле…'}[stage];
+ for(const li of $('join-stages').children){const index=stages.indexOf(li.dataset.stage),current=stages.indexOf(stage);li.classList.toggle('active',index===current);li.classList.toggle('done',index<current);}
+ $('join-submit').disabled=true;$('room-input').disabled=true;
+}
+const joinAttempt=createConnectionAttempt({onTick:drawJoinProgress,onTimeout:()=>failJoin('timeout')});
+function failJoin(reason){
+ networkGeneration++;joinAttempt.stop();clearTimeout(connectionTimer);abortRequests();online=false;pending=false;proposal=null;status('Не удалось подключиться',false);
+ if(role==='host'){$('create-room').disabled=false;notify('Сервер не ответил','Попробуйте создать партию ещё раз.');return;}
+ show('connect');$('room-input').value=room;$('join-feedback').hidden=false;$('join-feedback').classList.add('error');$('join-spinner').hidden=true;$('join-result-icon').hidden=false;$('join-countdown').hidden=true;$('join-retry').hidden=false;$('join-cancel').hidden=true;$('join-submit').disabled=false;$('room-input').disabled=false;
+ $('join-status').textContent=reason==='timeout'?'Не удалось подключиться за 30 секунд':reason==='room_not_found'?'Партия с таким кодом не найдена':'Соединение прервалось';
+ $('join-help').hidden=false;$('join-help').textContent=reason==='room_not_found'?'Обновите страницу ведущего и создайте новую партию: код от старой версии не подходит. Затем введите новый код.':'Проверьте, что сайт открывается на устройстве, и нажмите «Попробовать ещё раз». Переключать Wi-Fi и мобильную сеть не требуется.';
+}
+function ingest(data,force=false){
+ const previous=role==='guides'?guideState:state,changed=JSON.stringify(previous)!==JSON.stringify(data.state),oldAttempt=previous.attempt,oldWon=role==='guides'?guideState.arrived.every(Boolean):engine.won(state.pos);
+ if(role==='guides')guideState=data.state;else state=data.state;
+ if(host)$('clients-count').textContent=`Входы команд: ${data.players.movers?'исполнители ✓':'исполнители —'} · ${data.players.guides?'проводники ✓':'проводники —'}`;
+ if(changed||force){if(!drag)render();save();if(data.state.attempt>oldAttempt)toastOverlay('failure');else if(!oldWon&&(role==='guides'?guideState.arrived.every(Boolean):engine.won(state.pos)))toastOverlay('victory');}
+}
+function startPolling(){clearTimeout(connectionTimer);const generation=networkGeneration;
+ const poll=async()=>{if(generation!==networkGeneration||!netSession)return;try{const data=await api('/rooms/'+room,{session:netSession});if(generation!==networkGeneration)return;const wasOffline=!online;online=true;joinAttempt.stop();status(host?'Партия открыта · HTTPS':'Партия на связи · HTTPS',true);if(wasOffline){show('game');resetJoinFeedback();}ingest(data,wasOffline);}
+ catch(error){if(generation!==networkGeneration)return;online=false;pending=false;proposal=null;status('Восстанавливаем связь…',false,true);if(error.message==='room_not_found'){failJoin(error.message);return;}if(!joinAttempt.active){joinAttempt.start();joinAttempt.setStage('sync');}if(!drag)render();}
+ if(generation===networkGeneration)connectionTimer=setTimeout(poll,1200);};connectionTimer=setTimeout(poll,1200);
+}
 async function createRoom(){
- if(!window.Peer){notify('Не загрузилась связь','Проверьте интернет и обновите страницу.');return;}
- $('create-room').disabled=true;status('Создаём партию…',false);
- const bytes=crypto.getRandomValues(new Uint8Array(8));room=Array.from(bytes,b=>'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b%32]).join('');
- peer=new Peer('gatekeeper-v2-'+room,{debug:0});
- peer.on('open',async()=>{host=true;local=false;online=true;$('room-code').textContent=room;$('room-box').hidden=false;$('create-room').hidden=true;status('Партия открыта',true);publish();try{wake=await navigator.wakeLock?.request('screen');}catch{}});
- peer.on('connection',c=>{
-  if(!['movers','guides'].includes(c.metadata?.role)){c.close();return;}links.push(c);
-  c.on('open',()=>{safeSend(c,{kind:'welcome',role:c.metadata.role});safeSend(c,snapshot(c.metadata.role));publish();});
-  c.on('data',data=>{if(data?.kind==='ping'){safeSend(c,{kind:'pong'});return;}if(data?.kind==='snapshot-request'){safeSend(c,snapshot(c.metadata.role));return;}if(data?.kind==='move'&&c.metadata.role==='movers'){
-    if(data.revision!==state.revision){safeSend(c,snapshot('movers'));safeSend(c,{kind:'rejected',type:'stale'});return;}
-    const result=applyMove(data.token,data.to);if(!result.accepted)safeSend(c,{kind:'rejected',type:result.type,edge:result.edge});
-  }});
-  c.on('close',()=>{links=links.filter(x=>x!==c);publish();});c.on('error',()=>{links=links.filter(x=>x!==c);publish();});
- });
- peer.on('error',e=>{status('Связь недоступна',false);notify('Не удалось открыть партию','Проверьте интернет. Можно продолжить локальную проверку.');$('create-room').disabled=false;if(e.type==='unavailable-id')room='';});
- peer.on('disconnected',()=>{status('Восстанавливаем связь…',false);if(!peer.destroyed)peer.reconnect();});
+ shutdown();host=true;local=true;online=true;$('create-room').disabled=true;status('Создаём партию…',false,true);const generation=networkGeneration;
+ try{const data=await api('/rooms',{method:'POST',body:{}});if(generation!==networkGeneration)return;room=data.code;netSession={role:'host',token:data.token};local=false;online=true;$('room-code').textContent=room;$('room-box').hidden=false;$('create-room').hidden=true;status('Партия открыта · HTTPS',true);ingest(data,true);startPolling();try{wake=await navigator.wakeLock?.request('screen');}catch{}}
+ catch{if(generation===networkGeneration){online=true;local=true;$('create-room').disabled=false;status('Локальная проверка',true);notify('Не удалось создать партию','Сервер не ответил. Попробуйте ещё раз.');}}
 }
 $('create-room').onclick=createRoom;
 $('copy-code').onclick=async()=>{try{await navigator.clipboard.writeText(room);$('copy-code').textContent='Скопировано';setTimeout(()=>$('copy-code').textContent='Копировать',1600);}catch{notify('Код партии',room);}};
 $('join-form').onsubmit=e=>{e.preventDefault();joinRoom();};
-function joinRoom(){
- if(!window.Peer){$('join-status').textContent='Связь не загрузилась. Проверьте интернет и обновите страницу.';return;}
- room=$('room-input').value.toUpperCase().replace(/[^A-Z2-9]/g,'');if(room.length!==8){$('join-status').textContent='Нужен код из восьми знаков.';return;}
- if(peer)peer.destroy();peer=new Peer(undefined,{debug:0});$('join-status').textContent='Ищем планшет ведущего…';
- peer.on('open',()=>connectToHost());
- peer.on('error',e=>{online=false;pending=false;status('Нет связи с ведущим',false);$('join-status').textContent=e.type==='peer-unavailable'?'Партия не найдена. Проверьте код и страницу ведущего.':'Не удалось подключиться. Проверьте интернет.';if(role==='movers')render();});
- peer.on('disconnected',()=>{online=false;status('Восстанавливаем связь…',false);if(!peer.destroyed)peer.reconnect();});
- clearInterval(connectionTimer);connectionTimer=setInterval(()=>{if(!peer||peer.destroyed)return;if(connection?.open){safeSend(connection,{kind:'ping'});}else if(!peer.disconnected)connectToHost();},3500);
+async function joinRoom(){
+ const code=$('room-input').value.toUpperCase().replace(/[^A-Z2-9]/g,'');if(code.length!==8){room=code;failJoin('invalid_code');$('join-status').textContent='Нужен код из восьми знаков.';return;}
+ shutdown();room=code;const generation=networkGeneration;joinAttempt.start();
+ try{await api('/health',{timeoutMs:30000});if(generation!==networkGeneration)return;joinAttempt.setStage('host');const data=await api('/rooms/'+room+'/join',{method:'POST',body:{role},timeoutMs:30000});if(generation!==networkGeneration)return;joinAttempt.setStage('sync');netSession={role,token:data.token};online=true;pending=false;joinAttempt.stop();resetJoinFeedback();show('game');$('host-controls').hidden=true;$('view-title').textContent=role==='movers'?'Ваши руки':'Ваши глаза';$('view-subtitle').textContent=role==='movers'?'КОМАНДА I · ИСПОЛНИТЕЛИ':'КОМАНДА II · ПРОВОДНИКИ';status('Партия на связи · HTTPS',true);ingest(data,true);startPolling();}
+ catch(error){console.warn('Game connection failed:',error.name,error.message);if(generation===networkGeneration)failJoin(error.name==='AbortError'?'timeout':error.message);}
 }
-function connectToHost(){
- if(!peer||peer.destroyed||connection?.open)return;
- connection=peer.connect('gatekeeper-v2-'+room,{reliable:true,metadata:{role}});
- connection.on('open',()=>{online=true;pending=false;show('game');$('host-controls').hidden=true;$('view-title').textContent=role==='movers'?'Ваши руки':'Ваши глаза';$('view-subtitle').textContent=role==='movers'?'КОМАНДА I · ИСПОЛНИТЕЛИ':'КОМАНДА II · ПРОВОДНИКИ';status('Ведущий на связи',true);safeSend(connection,{kind:'snapshot-request'});render();});
- connection.on('data',data=>{
-  if(data?.kind==='snapshot'&&data.role===role){pending=false;proposal=null;const prev=role==='movers'?state.attempt:guideState.attempt;if(role==='movers')state=data.state;else guideState=data.state;render();if((role==='movers'?state.attempt:guideState.attempt)>prev)toastOverlay('failure');else if((role==='movers'?engine.won(state.pos):guideState.arrived.every(Boolean)))toastOverlay('victory');}
-  else if(data?.kind==='rejected'){pending=false;proposal=null;render();rejected(data);}
- });
- connection.on('close',()=>{online=false;pending=false;proposal=null;status('Связь потеряна · ходы остановлены',false);render();});connection.on('error',()=>{online=false;pending=false;status('Нет связи с ведущим',false);render();});
+$('join-retry').onclick=joinRoom;$('join-cancel').onclick=()=>{shutdown();resetJoinFeedback();};
+async function submitServerMove(i,to){
+ if(pending||!netSession||!online)return;pending=true;render();const generation=networkGeneration;
+ try{const data=await api('/rooms/'+room+'/move',{method:'POST',session:netSession,body:{token:i,to,revision:state.revision}});if(generation!==networkGeneration)return;pending=false;proposal=null;ingest(data,true);if(!data.accepted)rejected(data);}
+ catch{if(generation!==networkGeneration)return;pending=false;proposal=null;online=false;render();status('Проверяем состояние хода…',false,true);notify('Ответ пока не получен','Дождитесь восстановления связи: повторно ход не отправляется.');}
 }
 function rejected(result){const text={occupied:['Точка занята','Нужен свободный узел или собственный выход.'],blocked:['Перегородка поднята','Обсудите обход или отведите фигурку назад.'],invalid:['Один ход — один желоб','Перетащите знак только в соседний узел.'],stale:['Поле уже изменилось','Получено актуальное состояние. Выберите ход ещё раз.']}[result.type]||['Ход не принят','Повторите после обновления поля.'];notify(...text,result.type==='blocked'?'⊣':'↔');}
 function applyMove(i,to){
+ if(!local&&netSession){submitServerMove(i,to);return;}
  const result=engine.move(state,i,to);proposal=null;pending=false;
  if(!result.accepted){render();rejected(result);return result;}
  state=result.state;save();render();publish();if(['failure','victory'].includes(state.event.type))toastOverlay(state.event.type);return result;
 }
-$('confirm-move').onclick=()=>{if(!proposal||pending||!online)return;const move=proposal;if(host)applyMove(move.token,move.to);else{pending=true;safeSend(connection,{kind:'move',token:move.token,to:move.to,revision:state.revision});render();}};
+$('confirm-move').onclick=()=>{if(!proposal||pending||!online)return;const move=proposal;if(host)applyMove(move.token,move.to);else submitServerMove(move.token,move.to);};
 $('cancel-move').onclick=()=>{proposal=null;render();};
-$('restart').onclick=()=>{if(!confirm('Вернуть все фигурки на старт?'))return;state={...engine.initial(),revision:state.revision+1};proposal=null;save();render();publish();};
+$('restart').onclick=async()=>{if(!confirm('Вернуть все фигурки на старт?'))return;if(!local&&netSession){try{const data=await api('/rooms/'+room+'/reset',{method:'POST',body:{},session:netSession});proposal=null;ingest(data,true);}catch{notify('Нет ответа сервера','Сброс пока не подтверждён.');}return;}state={...engine.initial(),revision:state.revision+1};proposal=null;save();render();};
 $('reveal').onchange=e=>{reveal=e.target.checked;render();};$('overlay-close').onclick=()=>$('overlay').hidden=true;
 $('solution-step').onclick=async()=>{const {validation}=await fetch('solution.json').then(r=>r.json());let p=[...level.start],index=0;for(;index<validation.path.length;index++){if(p.every((n,i)=>n===state.pos[i]))break;const step=validation.path[index];p=engine.move({...engine.initial(),pos:p},step.token,step.to).state.pos;}if(index===validation.path.length){notify('Начните с исходного положения','Этот пошаговый маршрут проверен от старта.');return;}const step=validation.path[index];applyMove(step.token,step.to);};
 function svgEl(parent,tag,attrs={},text){const n=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,v);if(text!==undefined)n.textContent=text;parent.appendChild(n);return n;}

@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';import worker from './worker.mjs';
+let seq=0;const objects=new Map();const BUCKET={async get(k){const v=objects.get(k);return v?{etag:v.etag,json:async()=>JSON.parse(v.body)}:null;},async put(k,body,options){const v=objects.get(k),c=options?.onlyIf;if(c?.etagDoesNotMatch==='*'&&v||c?.etagMatches&&c.etagMatches!==v?.etag)return null;const etag=String(++seq);objects.set(k,{body,etag});return {etag};}};
+const request=async(path,method='GET',body,session)=>worker.fetch(new Request('https://relay.test'+path,{method,headers:{'Content-Type':'application/json',...(session?{'Authorization':'Bearer '+session.token,'X-Game-Role':session.role}:{})},body:body===undefined?undefined:JSON.stringify(body)}),{BUCKET});
+assert.equal((await request('/rooms','OPTIONS')).status,204);
+const h=await(await request('/rooms','POST',{})).json();assert(h.token&&h.code.length===8);assert.equal(h.role,'host');
+const movers=await(await request('/rooms/'+h.code+'/join','POST',{role:'movers'})).json(),guides=await(await request('/rooms/'+h.code+'/join','POST',{role:'guides'})).json();assert(movers.token!==guides.token&&h.token!==movers.token);assert(!('pos'in guides.state));assert(!JSON.stringify(guides).includes('gates'));
+assert.equal((await request('/rooms/'+h.code)).status,403);assert.equal((await request('/rooms/'+h.code+'/move','POST',{token:0,to:'E3',revision:0},guides)).status,403);
+const m=await(await request('/rooms/'+h.code+'/move','POST',{token:0,to:'E3',revision:0},movers)).json();assert(m.accepted);assert.equal(m.state.moves,1);
+const stale=await(await request('/rooms/'+h.code+'/move','POST',{token:0,to:'E4',revision:0},movers)).json();assert.equal(stale.type,'stale');assert.equal(stale.state.moves,1);
+const seen=await(await request('/rooms/'+h.code,'GET',undefined,h)).json();assert.equal(seen.state.pos[0],'E3');
+const reset=await(await request('/rooms/'+h.code+'/reset','POST',{},h)).json();assert.equal(reset.state.moves,0);assert.equal(reset.state.revision,2);
+assert.equal((await request('/rooms/ZZZZZZZZ/join','POST',{role:'movers'})).status,404);
+console.log('HTTPS API checks passed: create/join, separate snapshots, auth, authoritative moves, stale rejection, reset, CORS, missing room.');
