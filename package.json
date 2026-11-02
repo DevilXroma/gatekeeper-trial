@@ -1,0 +1,1 @@
+{"name":"gatekeeper-trial","version":"0.2.0","private":true,"scripts":{"test":"node test.mjs"}}
