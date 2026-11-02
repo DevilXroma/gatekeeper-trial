@@ -1,4 +1,5 @@
 import {level} from './level.mjs';
+import {boardLandmarks} from './board-art.mjs';
 import {createEngine,figures,edgeKey} from './engine.mjs';
 import {createConnectionAttempt} from './connection-attempt.mjs';
 import {api,abortRequests} from './relay.mjs';
@@ -13,7 +14,7 @@ const fallbackParticipant=crypto.randomUUID();
 const presentationCursor=createPresentationCursor();let sceneQueue=[],activeScene=null;
 function restore(){try{const v=JSON.parse(localStorage.getItem(storageKey));if(v?.version===2&&v.pos?.length===3&&v.pos.every(n=>level.nodes[n])&&new Set(v.pos).size===3)return v;}catch{}return engine.initial();}
 function save(){if(role==='host')try{localStorage.setItem(storageKey,JSON.stringify(state));}catch{}}
-function show(section){for(const id of ['lobby','connect','game'])$(id).hidden=id!==section;$('home-button').hidden=section==='lobby';document.body.dataset.screen=section;document.body.dataset.role=role||'';}
+function show(section){for(const id of ['lobby','connect','game'])$(id).hidden=id!==section;$('home-button').hidden=section==='lobby';document.body.dataset.screen=section;document.body.dataset.role=role||'';$('rules-button').hidden=section!=='game';}
 function notify(title,detail,icon='⌁',failure=false){$('event-title').textContent=title;$('event-detail').textContent=detail;$('event-icon').textContent=icon;$('event-strip').classList.toggle('failure',failure);}
 function status(text,ok,connecting=false){$('connection-pill').querySelector('span').textContent=text;$('connection-pill').classList.toggle('offline',!ok);$('connection-pill').classList.toggle('connecting',connecting);}
 function clearScenes(){sceneQueue=[];activeScene=null;$('overlay').hidden=true;$('overlay').removeAttribute('data-fx');$('overlay').removeAttribute('data-scene');$('scene-fx').replaceChildren();}
@@ -26,7 +27,7 @@ function toastOverlay(type){sceneQueue.push(...scenesForEvent({type,trap:0,token
 function showTeamIntro(){const guides=role==='guides';activeScene={kind:'intro'};$('overlay').removeAttribute('data-fx');$('overlay').dataset.scene='intro';$('scene-fx').replaceChildren();$('overlay').dataset.team=role;$('overlay-symbol').textContent=guides?'☾':'✧';$('overlay-title').textContent='Вы — '+teamNames[role];$('overlay-text').textContent=guides?'«Вам досталось зрение. Не торопитесь радоваться: руками придётся работать другим. И соседям — ни слова».':'«Вам достались руки. Уж распорядитесь ими получше последней смены. С соседями — без разговоров, я всё слышу». ';$('overlay-close').textContent='Так тому и быть';$('overlay').hidden=false;}
 function selectRole(next){
  role=next;proposal=null;pending=false;clearScenes();
- if(next==='host'){host=true;local=true;online=true;state=restore();room='';presentationCursor.reset('local',state.revision);show('game');$('host-controls').hidden=false;$('view-title').textContent='Стол ведущего';$('view-subtitle').textContent='ОБЕ КОМАНДЫ · ОБЩЕЕ СОСТОЯНИЕ';status('Локальная проверка',true);render();}
+ if(next==='host'){host=true;local=true;online=true;state=restore();room='';presentationCursor.reset('local',state.revision);show('game');$('host-controls').hidden=false;$('view-title').textContent='Стол ведущего';$('view-subtitle').textContent='ОБЩЕЕ СОСТОЯНИЕ';status('Локальная проверка',true);render();}
  else {host=false;local=false;online=false;$('join-role').textContent='ПРИВРАТНИК ЖДЁТ';resetJoinFeedback();show('connect');const params=new URLSearchParams(location.search);$('room-input').value=params.get('room')||'';}
 }
 $('player-button').onclick=()=>selectRole('join');$('developer-button').onclick=()=>selectRole('host');
@@ -93,13 +94,19 @@ $('reveal').onchange=e=>{reveal=e.target.checked;render();};$('overlay-close').o
 $('solution-step').onclick=async()=>{const {validation}=await fetch('solution.json').then(r=>r.json());let p=[...level.start],index=0;for(;index<validation.path.length;index++){if(p.every((n,i)=>n===state.pos[i]))break;const step=validation.path[index];p=engine.move({...engine.initial(),pos:p},step.token,step.to).state.pos;}if(index===validation.path.length){notify('Начните с исходного положения','Этот пошаговый маршрут проверен от старта.');return;}const step=validation.path[index];applyMove(step.token,step.to);};
 function svgEl(parent,tag,attrs={},text){const n=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,v);if(text!==undefined)n.textContent=text;parent.appendChild(n);return n;}
 function panel(guide){
- const section=document.createElement('section');section.className='board-panel';section.innerHTML=`<div class="board-top"><h2>${guide?'Тени':'Искры'}</h2><span>${guide?'«СМОТРИТЕ ВНИМАТЕЛЬНЕЕ»':'«РУКИ ТАК И ЧЕШУТСЯ?»'}</span></div><div class="stone-board"><svg role="img" aria-label="${guide?'Карта Теней':'Каменное поле Искр'}" data-board="${guide?'guides':'movers'}"></svg></div>`;
+ const section=document.createElement('section');section.className='board-panel';section.innerHTML=`<div class="stone-board"><svg role="img" aria-label="${guide?'Карта Теней':'Каменное поле Искр'}" data-board="${guide?'guides':'movers'}"></svg></div>`;
  $('boards').appendChild(section);draw(section.querySelector('svg'),guide);
 }
+// Resizing changes only the board's CSS size, never its nodes or input handlers.
+function fitBoard(){const r=$('boards').getBoundingClientRect();if(r.width>0&&r.height>0)$('boards').style.setProperty('--board-size',Math.floor(Math.min(r.width,r.height))+'px');}
+const boardObserver=new ResizeObserver(fitBoard);boardObserver.observe($('boards'));
+$('rules-button').onclick=()=>$('rules').showModal();$('rules-close').onclick=()=>$('rules').close();
 function draw(svg,guide){
- const size=Math.max(290,svg.getBoundingClientRect().width||500),pad=size<400?30:40,step=(size-pad*2)/4;svg.setAttribute('viewBox',`0 0 ${size} ${size}`);
+ const size=500,pad=40,step=(size-pad*2)/4;svg.setAttribute('viewBox',`0 0 ${size} ${size}`);
  const xy=id=>{const n=level.nodes[id];return [pad+n.c*step,pad+n.r*step];};svg._xy=xy;svg._size=size;
  svgEl(svg,'title',{},guide?'Карта Теней: опасные участки и три гнезда':'Поле Искр: подвижные жетоны, гнёзда и выдвинутые перегородки');
+ const landmarks=svgEl(svg,'g',{class:'landmarks','aria-label':'Каменные ориентиры'});
+ for(const mark of boardLandmarks){const x=pad+mark.c*step,y=pad+mark.r*step,g=svgEl(landmarks,'g',{class:'landmark',transform:`translate(${x} ${y})`,'data-landmark':mark.id,role:'img','aria-label':mark.name});svgEl(g,'title',{},mark.name);for(const d of mark.paths){svgEl(g,'path',{d,class:'carving-shadow',transform:'translate(0 -1)'});svgEl(g,'path',{d,class:'carving-line'});}}
  for(const[a,b]of level.edges){const[x1,y1]=xy(a),[x2,y2]=xy(b);svgEl(svg,'line',{x1,y1,x2,y2,class:'channel-bottom'});svgEl(svg,'line',{x1,y1,x2,y2,class:'channel'});
   if((guide||reveal&&host)&&level.danger.includes(edgeKey(a,b))){const x=(x1+x2)/2,y=(y1+y2)/2,index=level.danger.indexOf(edgeKey(a,b)),theme=trapThemes[index],g=svgEl(svg,'g',{class:'hazard','data-trap':index,role:'img','aria-label':theme.name});svgEl(g,'ellipse',{cx:x,cy:y+3,rx:17,ry:7,fill:theme.color,'fill-opacity':.13,class:'flame-glow'});const foreign=svgEl(g,'foreignObject',{x:x-22,y:y-37,width:44,height:48,'pointer-events':'none'});const flame=document.createElement('div');flame.className='flame-sprite';flame.style.setProperty('--hue',theme.hue+'deg');flame.style.setProperty('--delay',-index*.12+'s');foreign.appendChild(flame);}
  }
@@ -135,8 +142,8 @@ function beginDrag(e,svg,i,g,handle){
 }
 function render(){
  if(!role)return;const guide=role==='guides',current=guide?guideState:state,arrived=guide?guideState.arrived:state.pos.map((_,i)=>engine.done(state.pos,i));
- $('boards').replaceChildren();$('boards').classList.toggle('dual',host);if(!guide)panel(false);if(guide||host)panel(true);
- $('progress-line').replaceChildren();figures.forEach((f,i)=>{const d=document.createElement('div');d.className='progress-chip'+(arrived[i]?' arrived':'');d.style.setProperty('--color',f.color);d.innerHTML=`<span style="color:${f.color}">${f.symbol}</span>${f.name}${arrived[i]?' · на выходе':''}`;$('progress-line').appendChild(d);});
+ $('boards').replaceChildren();$('boards').classList.remove('dual');panel(guide);fitBoard();
+ $('progress-line').replaceChildren();figures.forEach((f,i)=>{const d=document.createElement('div');d.className='progress-chip'+(arrived[i]?' arrived':'');d.style.setProperty('--color',f.color);d.innerHTML=`<span style="color:${f.color}">${f.symbol}</span>${f.name}${arrived[i]?' ✓':''}`;$('progress-line').appendChild(d);});
  $('action-strip').hidden=guide;$('proposal').hidden=!proposal;$('instruction').hidden=!!proposal;$('instruction').textContent=!online?'«Постойте-ка. Голоса не слышно» — восстанавливаем связь':pending?'«Сейчас, сейчас. Дайте камню подумать»':arrived.every(Boolean)?'За дверью слышен скрежет засова':'«Круглый жетон берите. Да, этот. Теперь по желобу»';
  if(proposal){const from=level.nodes[state.pos[proposal.token]],to=level.nodes[proposal.to],direction=to.c>from.c?'вправо →':to.c<from.c?'влево ←':to.r>from.r?'вниз ↓':'вверх ↑';$('proposal-text').textContent=`${figures[proposal.token].symbol} ${figures[proposal.token].name} — ${direction}`;}
  $('confirm-move').disabled=pending||!online;$('cancel-move').disabled=pending;
@@ -147,8 +154,7 @@ function render(){
  notify(...(messages[ev.type]||messages.move),ev.type==='failure');
  $('solution-step').disabled=!host||engine.won(state.pos);
 }
-let boardLayoutWidth=document.documentElement.clientWidth,layoutFrame=0;
-window.addEventListener('resize',()=>{const width=document.documentElement.clientWidth;if(width===boardLayoutWidth)return;boardLayoutWidth=width;cancelAnimationFrame(layoutFrame);layoutFrame=requestAnimationFrame(()=>{if(!drag&&role&&$('game').hidden===false)render();});});
+window.addEventListener('resize',fitBoard);
 document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'&&host&&!local)try{wake=await navigator.wakeLock?.request('screen');}catch{}});
 const initialRole=new URLSearchParams(location.search).get('role');if(initialRole==='host')selectRole('host');else if(initialRole)selectRole('join');
 startAmbience($('ambient-particles'));

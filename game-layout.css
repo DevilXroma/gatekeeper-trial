@@ -1,0 +1,72 @@
+/* The play surface occupies the available viewport; no scrolling during a move.
+   Artwork has a fixed viewBox. Resizing never replaces pointer-capture targets. */
+body[data-screen=game]{height:100svh;min-height:0;overflow:hidden}
+body[data-screen=game] #app{height:100%;max-width:1280px;padding:0 max(12px,env(safe-area-inset-left)) max(6px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:4px}
+body[data-screen=game] .top{flex:none;min-height:44px;padding:0;gap:8px}
+body[data-screen=game] .brand{font-size:8px;gap:6px;line-height:1.3}
+body[data-screen=game] .brand strong{font-size:9px}
+body[data-screen=game] .brand-mark{font-size:25px}
+#rules-button{margin-left:auto}
+body[data-screen=game] .top>#home-button{margin-left:0}
+body[data-screen=game] button{min-height:44px;font-size:11px;padding:7px 10px}
+body[data-screen=game] #game{flex:1;min-height:0;display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto auto;grid-template-areas:'heading' 'host' 'progress' 'board' 'action' 'event';gap:5px}
+body[data-screen=game] .game-heading{grid-area:heading;align-items:center;margin:0;min-height:28px;gap:8px}
+body[data-screen=game] .game-heading h1{font-size:21px;line-height:1.2;margin:0}
+body[data-screen=game] #view-subtitle{display:none}
+body[data-screen=game] .connection-pill{font-size:9px;margin:0;max-width:160px}
+body[data-screen=game] .host-controls{grid-area:host;display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;padding:0;margin:0;border:0}
+body[data-screen=game] .host-controls>.toggle{min-height:44px;font-size:11px;justify-content:center;gap:6px}
+body[data-screen=game] .host-controls input{width:20px;height:20px;accent-color:var(--copper)}
+body[data-screen=game] #room-box{grid-column:1/-1;display:flex;gap:8px;justify-content:center;flex-wrap:nowrap}
+body[data-screen=game] #room-box>span:first-child{display:none}
+body[data-screen=game] #room-code{font-size:16px;letter-spacing:2px}
+body[data-screen=game] #clients-count{font-size:9px}
+body[data-screen=game] .progress-line{grid-area:progress;flex-wrap:nowrap;justify-content:center;gap:4px;margin:0;min-height:27px}
+body[data-screen=game] .progress-chip{padding:3px 8px;font-size:10px;gap:5px;white-space:nowrap}
+body[data-screen=game] .progress-chip span{font-size:17px}
+body[data-screen=game] .boards{grid-area:board;display:grid;place-items:center;min-height:0;min-width:0;width:100%;max-width:none;margin:0;gap:0;overflow:visible}
+body[data-screen=game] .board-panel{width:var(--board-size,250px);height:var(--board-size,250px);min-width:0;min-height:0}
+/* Avoid clipping an animated SVG compositing layer while the browser toolbar moves. */
+body[data-screen=game] .stone-board{width:100%;height:100%;aspect-ratio:1;clip-path:none;isolation:auto;overflow:visible;border-radius:4px}
+body[data-screen=game] .stone-board svg{width:100%;height:100%;aspect-ratio:1;overflow:visible;touch-action:none}
+body[data-screen=game] .stone-board:after{mix-blend-mode:normal;opacity:.025}
+body[data-screen=game] .stone-board .token{filter:none}
+body[data-screen=game] .stone-board .token-float{will-change:auto}
+body[data-screen=game] .token-controls{z-index:3}
+body[data-screen=game] .token-controls .token-handle{width:clamp(32px,12%,60px);height:auto;aspect-ratio:1;padding:0;min-height:0;transform:translate(-50%,-50%)}
+body[data-screen=game] .action-strip{grid-area:action;min-height:46px;padding:1px 4px;margin:0;overflow:visible}
+body[data-screen=game] .instruction{font-size:11px;text-align:center;line-height:1.4}
+body[data-screen=game] #proposal{gap:6px;flex-wrap:nowrap}
+body[data-screen=game] #proposal-text{font-size:11px}
+body[data-screen=game] .event-strip{grid-area:event;gap:7px;min-height:48px;margin:0;padding:4px 0;align-items:center}
+body[data-screen=game] .event-icon{width:25px;height:25px;font-size:20px}
+body[data-screen=game] .event-strip>div:not(.counters){flex:1;min-width:0}
+body[data-screen=game] .event-strip strong{font-size:11px;line-height:1.35}
+body[data-screen=game] .event-strip>div>span{max-width:none;margin-top:2px;font-size:10px;line-height:1.35}
+body[data-screen=game] .counters{font-size:9px;line-height:1.5}
+.landmarks{pointer-events:none}
+.landmark path{fill:none;stroke-linejoin:round;stroke-linecap:round;stroke-width:2.5}
+.landmark .carving-shadow{stroke:#080f11;stroke-width:4.5}
+.landmark .carving-line{stroke:#a4a18b;stroke-opacity:.62}
+#rules{max-width:680px;max-height:85svh;overflow:auto;border:1px solid #88704c;background:#142021;color:var(--ink);padding:20px}
+#rules::backdrop{background:#03090de8}
+#rules-close{float:right}
+#rules h2{font-family:Prata,Georgia,serif;font-size:22px;line-height:1.5;margin-top:5px}
+/* Wide devices place controls beside the board instead of squeezing its height. */
+@media(min-aspect-ratio:6/5){
+ body[data-screen=game] #game{grid-template-columns:minmax(0,1fr) minmax(250px,34%);grid-template-rows:auto auto auto minmax(0,1fr) auto auto;grid-template-areas:'board heading' 'board host' 'board progress' 'board spare' 'board action' 'board event';column-gap:20px}
+ body[data-screen=game] .game-heading{align-items:flex-start;flex-wrap:wrap}
+ body[data-screen=game] .connection-pill{max-width:none}
+ body[data-screen=game] .event-strip{align-self:end}
+ body[data-screen=game] #proposal{flex-wrap:wrap}
+ body[data-screen=game] #proposal-text{width:100%;text-align:center}
+}
+@media(max-height:450px) and (min-aspect-ratio:6/5){
+ body[data-screen=game] #app{gap:0;padding-bottom:3px}
+ body[data-screen=game] #game{gap:3px 12px}
+ body[data-screen=game] .top{min-height:38px}
+ body[data-screen=game] .top button{min-height:36px}
+ body[data-screen=game] .event-strip>div>span{display:none}
+ body[data-screen=game] .game-heading h1{font-size:18px}
+ body[data-screen=game] .game-heading{flex-wrap:nowrap}
+}
